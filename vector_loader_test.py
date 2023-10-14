@@ -14,7 +14,7 @@ from qiskit.utils import algorithm_globals
 np.random.seed(5)
 algorithm_globals.random_seed = 5
 
-def get_RBS_parameters(x):
+def get_RBS_parameters_parallel(x):
     # get recursively the angles
     def angles(y):
         #Get the len of the components. In the first call it is the length of the vector in input!!
@@ -44,8 +44,11 @@ def get_RBS_parameters(x):
 
     return torch.nan_to_num(thetas)
 
-def get_RBS_parameters2(x):
-    # get recursively the angles
+
+def get_RBS_parameters_diagonal(x):
+    #
+    parameters = []
+    x[:,:, 0]
     def angles(y):
         #Get the len of the components. In the first call it is the length of the vector in input!!
         d = y.shape[-1]
@@ -54,7 +57,7 @@ def get_RBS_parameters2(x):
             thetas = torch.acos(y[:,:, 0] / torch.linalg.norm(y, ord=None, dim=2))
             #print("thetas.shape: ", thetas.shape)
             signs = (y[:, :, 1] > 0.).int()
-            thetas = signs * thetas + (1. - signs) * (2. * np.pi - thetas)
+            thetas = signs * thetas + (1. - signs) * (2*np.pi - thetas)
             #print("thetas.shape: ", thetas.shape)
             thetas = thetas[:,:, None]
             return thetas
@@ -74,31 +77,17 @@ def get_RBS_parameters2(x):
 
     return torch.nan_to_num(thetas)
 
-class RBS_gate:
-    def __init__(self, parameter_name):
-        self.n_qubits = 2
-        self._circuit = qis.QuantumCircuit(self.n_qubits)
-        self.theta = qis.circuit.Parameter(parameter_name)
-        self._circuit.h([0,1])#DEBUG
-        self._circuit.cz(0,1)
-        self._circuit.ry(self.theta*0.5, 0)
-        self._circuit.ry(-self.theta*0.5, 1)
-        self._circuit.cz(0,1)
-        self._circuit.h([0,1])#DEBUG
 
-    def __call__(self, theta=None):
-      if theta != None:
-        self._circuit = self._circuit.bind_parameters({self.theta: theta})
-      
-      return self._circuit.to_gate()
 
+
+    
 class VectorLoader:
     """ 
     This class provides a simple interface for interaction 
     with the quantum circuit 
     """
     
-    def __init__(self, num_features, parameter_name):
+    def __init__(self, num_features, parameters):
         # --- Circuit definition ---
         self.n_qubits = num_features
         self._circuit = qis.QuantumCircuit(self.n_qubits)
@@ -117,71 +106,15 @@ class VectorLoader:
         while temp != 1:#FIXME doesn't work with num_features == 2
           #print(temp)
           for i in range(self.n_qubits//temp):
-            parameter = parameter_name + "{:02d}"
-            parameter = parameter.format(id_gate)
             #print(id_gate)
             id_gate += 1
-            rbs = RBS_gate(parameter)
+            rbs = rbs_gate(parameters[0])
             #index = self.n_qubits//temp
             step = temp // 2
             idx = i*2*step
             #print("step:", step)
             #print("idx:", idx, " to idx+1:", idx+step)
-            self._circuit.append(rbs(), [idx, idx+step])
-            #self._circuit.barrier()
-          
-          #num_gates_each_level = num_gates_each_level*2
-          self._circuit.barrier()
-          temp = temp // 2
-
-    def __call__(self, thetas=None):
-      if thetas != None:
-        #all_thetas = [i for i in range(len(thetas))]
-        #print(thetas)
-        index = 0
-        for param in self._circuit.parameters:
-          #print(len(self._circuit.parameters))
-          self._circuit = self._circuit.bind_parameters({param: thetas[index]})
-          index += 1
-    
-      return self._circuit
-    
-class VectorLoader:
-    """ 
-    This class provides a simple interface for interaction 
-    with the quantum circuit 
-    """
-    
-    def __init__(self, num_features, parameter_name):
-        # --- Circuit definition ---
-        self.n_qubits = num_features
-        self._circuit = qis.QuantumCircuit(self.n_qubits)
-        self._circuit.x(0)
-
-        #self.num_gates = self.n_qubits//2 * torch.log2(self.n_qubits)
-        #self.num_gates_each_level = self.num_qubits//2
-        #self.num_gates = self.n_qubits//2 * np.log2(self.n_qubits)
-        step = self.n_qubits//2
-        #print((self.n_qubits//temp) != self.n_qubits)
-        num_gates_each_level = 1
-        id_gate = 0
-        temp = self.n_qubits
-        
-        #while num_gates_each_level != (self.n_qubits//2):#FIXME doesn't work with num_features == 2
-        while temp != 1:#FIXME doesn't work with num_features == 2
-          #print(temp)
-          for i in range(self.n_qubits//temp):
-            parameter = parameter_name + "{:02d}"
-            parameter = parameter.format(id_gate)
-            #print(id_gate)
-            id_gate += 1
-            rbs = RBS_gate(parameter)
-            #index = self.n_qubits//temp
-            step = temp // 2
-            idx = i*2*step
-            #print("step:", step)
-            #print("idx:", idx, " to idx+1:", idx+step)
-            self._circuit.append(rbs(), [idx, idx+step])
+            self._circuit.append(rbs, [idx, idx+step])
             #self._circuit.barrier()
           
           #num_gates_each_level = num_gates_each_level*2
@@ -202,30 +135,31 @@ class VectorLoader:
 
 #x = torch.tensor([[torch.sqrt(torch.tensor(2))/2, torch.sqrt(torch.tensor(2))/2]])
 
-x = torch.tensor([[0.,0.,0.,1.]])
+#x = torch.tensor([[0.5,0.5,0.5,0.5]])
+#x = torch.tensor([[1/torch.sqrt(torch.tensor(2)),1/torch.sqrt(torch.tensor(2))]])
 #x = torch.tensor([[0.,0.,0.,0.,0.,0.,0.,1.]])
 #x = torch.tensor([[0.5,0.5, 0.5, 0.5]])
-#x = torch.tensor([[0.25,0.25,0.25,0.25, 0.25,0.25,0.25,0.25, 0.25,0.25,0.25,0.25, 0.25,0.25,0.25,0.25]])
+x = torch.tensor([[0.25,0.25,0.25,0.25, 0.25,0.25,0.25,0.25, 0.25,0.25,0.25,0.25, 0.25,0.25,0.25,0.25]])
 #x = torch.tensor([[0.1,0.2,0.3,0.4, 0.5,0.6,0.7,0.8, 0.9,0.10,0.11,0.12, 0.13,0.14,0.15,0.16]])
 #x = torch.tensor([[7/torch.sqrt(torch.tensor(113)), 8/torch.sqrt(torch.tensor(113))]])
-#x = torch.tensor([[0.,1.]])
+#x = torch.tensor([[1.,0.]])
 
-param = get_RBS_parameters(x[None, :])
+param = get_RBS_parameters_parallel(x[None, :])
 param = param.flatten().tolist()
 
 print(param)
 
-temp = param[0]
+"""temp = param[0]
 param[0] = param[2]
 param[2] = param[1]
 param[1] = temp
-sub = [np.pi/2, np.pi/2, np.pi/2]
+sub = [np.pi/2, np.pi/2, np.pi/2]"""
 
 print(param)
 n_qubits = len(param)+1
 
-for i in range(len(param)):
-   param[i] = param[i] - sub[i]
+"""for i in range(len(param)):
+   param[i] = param[i] - sub[i]"""
 
 print(param)
 
@@ -247,17 +181,22 @@ def rbs_gate(parameter):
 
     return gate
 
-
+"""
+TODO Find the algorithm for parameter computation
+#Diagonal Vector Loader
 vec_loader = qis.QuantumCircuit(n_qubits)
 vec_loader.x(0)
 for i in range(n_qubits-1):
     rbs = rbs_gate(param[i])
     #rbs = RBS_gate(f"theta{i:02d}")
     vec_loader.append(rbs, [i, i+1])
+vec_loader.measure_all()"""
+
+vec_loader = VectorLoader(16, param)()
 vec_loader.measure_all()
 
 
-shots = 1000000
+shots = 100000
 
 fig = vec_loader.draw("mpl", scale = 0.5)
 plt.show()
