@@ -1,6 +1,6 @@
 import torch
 
-import model as m
+import new_model as m
 import data as d
 
 

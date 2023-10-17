@@ -1,5 +1,11 @@
 import torch
 import numpy as np
+import matplotlib.pyplot as plt
+
+from qiskit.tools.visualization import plot_histogram
+from qiskit import transpile
+from qiskit import Aer
+
 
 def img_to_patch(x, patch_size, flatten_channels=True):
     """
@@ -17,30 +23,28 @@ def img_to_patch(x, patch_size, flatten_channels=True):
         x = x.flatten(2,4)          # [B, H'*W', C*p_H*p_W]
     return x
 
-def get_RBS_parameters(x):
-    # get recursively the angles
-    def angles(y):
-        d = y.shape[-1]
-        if d == 2:
-            #print(y.shape)
-            thetas = torch.acos(y[:,:, 0] / torch.linalg.norm(y, ord=None, dim=2))
-            #print("thetas.shape: ", thetas.shape)
-            signs = (y[:, :, 1] > 0.).int()
-            thetas = signs * thetas + (1. - signs) * (2. * np.pi - thetas)
-            #print("thetas.shape: ", thetas.shape)
-            thetas = thetas[:,:, None]
-            return thetas
-        else:
-            thetas = torch.acos(torch.linalg.norm(y[:,:, :d//2], ord=None, dim=2, keepdim=True) / torch.linalg.norm(y, ord=None, dim=2, keepdim=True))
-            #print("else: thetas.shape: ", thetas.shape)
-            #print("y[:,:, :d // 2]", y[:, :, :d // 2])
-            thetas_l = angles(y[:, :, :d//2])
-            thetas_r = angles(y[:, :, d//2 :])
-            thetas = torch.cat((thetas, thetas_l, thetas_r), axis=2)
-            #print("thetas.shape: ", thetas.shape)
-        return thetas
+def temporary():
+    shots = 100000
+    vec_loader = None
 
-    # result
-    thetas = angles(x)
+    fig = vec_loader.draw("mpl", scale = 0.5)
+    plt.show()
 
-    return torch.nan_to_num(thetas)
+    fig = vec_loader.decompose().draw("mpl", scale = 0.5)
+    plt.show()
+
+    # Transpile for simulator
+    simulator = Aer.get_backend('aer_simulator')
+    circ = transpile(vec_loader, simulator)#<----
+
+    # Run and get counts
+    result = simulator.run(circ, shots=shots).result()
+    counts = result.get_counts(circ)
+    print(counts)
+    components_values = dict((k, np.sqrt(v/shots)) for k, v in counts.items())
+    print(components_values)
+
+    fig = plot_histogram(counts, title='Bell-State counts')
+    plt.show()
+
+    return

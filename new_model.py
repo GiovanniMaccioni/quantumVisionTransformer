@@ -20,149 +20,59 @@ from qiskit_aer.primitives import Sampler as AerSampler
 
 import utils as ut
 
+import vector_loaders
+import matrix_multiplication
+
 #device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 device = torch.device("cpu")
+from functools import reduce
 
-class RBS_gate:
-    def __init__(self, parameter_name):
-        self.n_qubits = 2
-        self._circuit = qis.QuantumCircuit(self.n_qubits)
-        self.theta = qis.circuit.Parameter(parameter_name)
-        self._circuit.h([0,1])#DEBUG
-        self._circuit.cz(0,1)
-        self._circuit.ry(self.theta*0.5, 0)
-        self._circuit.ry(-self.theta*0.5, 1)
-        self._circuit.cz(0,1)
-        self._circuit.h([0,1])#DEBUG
-
-    def __call__(self, theta=None):
-      if theta != None:
-        self._circuit = self._circuit.bind_parameters({self.theta: theta})
-      
-      return self._circuit.to_gate()
-
-class VectorLoader:
-    """ 
-    This class provides a simple interface for interaction 
-    with the quantum circuit 
-    """
-    
-    def __init__(self, num_features, parameter_name):
-        # --- Circuit definition ---
-        self.n_qubits = num_features
-        self._circuit = qis.QuantumCircuit(self.n_qubits)
-        self._circuit.x(0)
-
-        #self.num_gates = self.n_qubits//2 * torch.log2(self.n_qubits)
-        #self.num_gates_each_level = self.num_qubits//2
-        #self.num_gates = self.n_qubits//2 * np.log2(self.n_qubits)
-        step = self.n_qubits//2
-        #print((self.n_qubits//temp) != self.n_qubits)
-        num_gates_each_level = 1
-        id_gate = 0
-        temp = self.n_qubits
+def get_RBS_parameters(x):
+        #
+        alpha_list = []
+        inv_sin_list = []
+        #
+        for i in range(x.shape[2] - 1):
+            if len(alpha_list) == 0:
+                alpha = torch.acos(x[:, :, i])
+                #alpha = torch.nan_to_num(alpha)
+                alpha_list.append(alpha)
+            else:
+                inv_sin = 1/torch.sin(alpha_list[i-1])
+                #if the sin of the alpha angle is 0, we have to convert the nan value to 0
+                inv_sin = torch.nan_to_num(inv_sin)
+                inv_sin_list.append(inv_sin)
+                t = reduce(lambda a, b: a*b, inv_sin_list)
+                alpha = torch.acos(x[:, :, i]*t)
+                alpha_list.append(alpha)
         
-        #while num_gates_each_level != (self.n_qubits//2):#FIXME doesn't work with num_features == 2
-        while temp != 1:#FIXME doesn't work with num_features == 2
-          #print(temp)
-          for i in range(self.n_qubits//temp):
-            parameter = parameter_name + "{:02d}"
-            parameter = parameter.format(id_gate)
-            #print(id_gate)
-            id_gate += 1
-            rbs = RBS_gate(parameter)
-            #index = self.n_qubits//temp
-            step = temp // 2
-            idx = i*2*step
-            #print("step:", step)
-            #print("idx:", idx, " to idx+1:", idx+step)
-            self._circuit.append(rbs(), [idx, idx+step])
-            #self._circuit.barrier()
-          
-          #num_gates_each_level = num_gates_each_level*2
-          self._circuit.barrier()
-          temp = temp // 2
+        parameters = torch.stack(alpha_list, dim=2)
+        parameters = torch.nan_to_num(parameters)
 
-    def __call__(self, thetas=None):
-      if thetas != None:
-        #all_thetas = [i for i in range(len(thetas))]
-        print(thetas)
-        index = 0
-        for param in self._circuit.parameters:
-          print(len(self._circuit.parameters))
-          self._circuit = self._circuit.bind_parameters({param: thetas[index]})
-          index += 1
-    
-      return self._circuit
+        return parameters
 
-class Butterfly:
+
+class Vx:
     """ 
     This class provides a simple interface for interaction 
     with the quantum circuit 
     """
     
-    def __init__(self, num_features, parameter_name):
+    def __init__(self, n_qubits):
         # --- Circuit definition ---
-        self.n_qubits = num_features
-        self._circuit = qis.QuantumCircuit(self.n_qubits)
-        self.thetas = [] 
-        #self.num_gates = self.n_qubits//2 * torch.log2(self.n_qubits)
-        #self.num_gates_each_level = self.num_qubits//2
-        self.num_gates = self.n_qubits//2 * np.log2(self.n_qubits)
-        temp = self.n_qubits
-        #print((self.n_qubits//temp) != self.n_qubits)
-        id_gate = 0
-        
-        while (self.n_qubits//temp) != self.n_qubits:
-          #print(temp)
-          for i in range(self.n_qubits//2):
-            parameter = parameter_name + "{:02d}"
-            parameter = parameter.format(id_gate)
-            #print(id_gate)
-            id_gate += 1
-            rbs = RBS_gate(parameter)
-            #index = self.n_qubits//temp
-            step = temp // 2
-            idx = i + (i//step)*step
-            #print("step:", step)
-            #print("idx:", idx, " to idx+1:", idx+step)
-            self._circuit.append(rbs(), [idx, idx+step])
-            
-          self._circuit.barrier()
-          temp = temp // 2
+        thetas = qis.circuit.ParameterVector("thetas", length=n_qubits-1)
+        vec_loader = vector_loaders.Diagonal_VectorLoader(thetas)()
+        matrix = matrix_multiplication.Butterfly(n_qubits)()
 
-    def __call__(self, thetas=None):
-      if thetas != None:
-        #all_thetas = [i for i in range(len(thetas))]
-        print(thetas)
-        index = 0
-        for param in self._circuit.parameters:
-          print(len(self._circuit.parameters))
-          self._circuit = self._circuit.bind_parameters({param: thetas[index]})
-          index += 1
-    
-      return self._circuit
-
-
-class Vx:#DEBUG Added here hadamard gates instead of keeping them in the RBS_Gate class
-    """ 
-    This class provides a simple interface for interaction 
-    with the quantum circuit 
-    """
-    
-    def __init__(self, n_qubits, vector_parameter_name, V_parameter_name):
-        # --- Circuit definition ---
-        self.num_qubits = n_qubits ## Aggiunto per compatibilità con EstimatorQNN
         self._circuit = qis.QuantumCircuit(n_qubits)
-        self.vec_loader = VectorLoader(n_qubits, vector_parameter_name)()
-        self.V = Butterfly(n_qubits, V_parameter_name)()
         #self._circuit.h([0,1, 2, 3])#DEBUG
-        self._circuit.compose(self.vec_loader.compose(self.V), inplace = True) 
+        self._circuit.compose(vec_loader.compose(matrix), inplace = True) 
         #self._circuit.h([0,1, 2, 3])#DEBUG
         #TODO take the z expectaion value _circuit.exp_val<-----
         self._circuit.measure_all()
-        self.parameters = self._circuit.parameters
         # ---------------------------
+    def __call__(self):
+      return self._circuit
 
 
 class xWx:
@@ -171,17 +81,23 @@ class xWx:
     with the quantum circuit 
     """
     
-    def __init__(self, n_qubits, i_vector_parameter_name, W_parameter_name, j_vector_parameter_name):
+    def __init__(self, n_qubits):
         # --- Circuit definition ---
         self.num_qubits = n_qubits ## Aggiunto per compatibilità con EstimatorQNN
+        thetas = qis.circuit.ParameterVector("thetas", length=n_qubits-1)
+        phis = qis.circuit.ParameterVector("phis", length=n_qubits-1)
+
         self._circuit = qis.QuantumCircuit(n_qubits)
-        self.vec_loader = VectorLoader(n_qubits, i_vector_parameter_name)()
-        self.W = Butterfly(n_qubits, W_parameter_name)()
-        self.vec_loader_adjoint = VectorLoader(n_qubits, j_vector_parameter_name)().inverse()
+        self.vec_loader = vector_loaders.Diagonal_VectorLoader(thetas)()
+        self.W = matrix_multiplication.Butterfly(n_qubits)()
+        self.vec_loader_adjoint = vector_loaders.Diagonal_VectorLoader(phis)().inverse()
+
         self._circuit.compose(self.vec_loader.compose(self.W.compose(self.vec_loader_adjoint)), inplace = True)
         #TODO take the z expectaion value _circuit.exp_val<-----   
         self._circuit.measure_all()
         # ---------------------------
+    def __call__(self):
+      return self._circuit
 
 
 class quantumAttentionBlock(nn.Module):
@@ -225,11 +141,11 @@ class quantumAttentionBlock(nn.Module):
         #(b - a) * random_sample() + a
 
         #TODO Maybe estimator instead of sampler
-        qc = Vx(embed_dim, "theta", "sigma")
-        self._vx = TorchConnector(SamplerQNN(circuit=qc._circuit, input_params=qc.vec_loader.parameters, weight_params=qc.V.parameters, input_gradients=True))#, sampler = self.sampler
+        qc = Vx(embed_dim)()
+        self._vx = TorchConnector(SamplerQNN(circuit=qc, input_params=qc.parameters[-embed_dim+1:], weight_params=qc.parameters[:embed_dim], input_gradients=True))#, sampler = self.sampler
 
-        qc = xWx(embed_dim, "theta", "sigma", "phi")
-        self._xwx = TorchConnector(SamplerQNN(circuit=qc._circuit, input_params= list(qc.vec_loader.parameters) + list(qc.vec_loader_adjoint.parameters), weight_params=qc.W.parameters, input_gradients=True))#, sampler = self.sampler
+        qc = xWx(embed_dim)()
+        self._xwx = TorchConnector(SamplerQNN(circuit=qc, input_params=qc.parameters[-embed_dim+1:]+qc.parameters[:embed_dim-1], weight_params=qc.parameters[embed_dim -1:-embed_dim+1], input_gradients=True))#, sampler = self.sampler
 
         self.layer_norm_2 = nn.LayerNorm(embed_dim)
         self.linear = nn.Sequential(
@@ -245,7 +161,7 @@ class quantumAttentionBlock(nn.Module):
         #TOCHECK maybe leave the plus one out of num_patches for readibility
         #num_patches is including the +1 for the cls token
         #x----> [batch_size, num_patches, emb_dim]
-        inp_x = self.layer_norm_1(x)
+        inp_x = self.layer_norm_1(x)/2
 
         #vx ----> [batch_size, embed_dim, num_patches]
         vx = torch.empty((inp_x.shape[0], inp_x.shape[2], inp_x.shape[1])).to(device)
@@ -255,7 +171,8 @@ class quantumAttentionBlock(nn.Module):
         #TOCHECK parameters ---> [batch_size, num_patches, embed_dim - 1]
         #I have to verify that the number pf parameters is coehernt with the paper even if I change the circuits(vector_loader and network)
         #TOCHECK check that each vector in inp_x is at norm 1!!!!
-        parameters = ut.get_RBS_parameters(inp_x)
+        #FIXME
+        parameters = get_RBS_parameters(inp_x)
         #print("parameters", parameters)
         #print("parameters.shape", parameters.shape)
 
@@ -266,8 +183,7 @@ class quantumAttentionBlock(nn.Module):
         #e.g. for embed_dim == num_qubits == 4 : 1:|0001>, 2:|0010>, 4:|0100>, 8:|1000>
         ei = [ 2**j for j in range(0,self.embed_dim)]
         for i in range(self.num_patches):
-          temp = self._vx(parameters[:,i,:])
-          vx[:, :, i] = temp[:, ei]
+          vx[:, :, i] = self._vx(parameters[:,i,:])[:, ei]
           #vx[:, :, i] = self._vx(parameters[:,i,:])[:, ei]
           #print("vx[:, :, i]:", vx[:, :, i])
 
@@ -279,9 +195,7 @@ class quantumAttentionBlock(nn.Module):
         ei = [j for j in range(1,2**self.embed_dim, 2)]
         for i in range(self.num_patches):
           for j in range(self.num_patches):
-            temp = self._xwx(torch.cat((parameters[:,i,:], parameters[:, j, :]), dim = 1))[:,ei]
-            temp = torch.sum(temp, dim=1)
-            xwx[:, i,j] = temp
+            xwx[:, i,j] = self._xwx(torch.cat((parameters[:,i,:], parameters[:, j, :]), dim = 1))[:,ei]
             #xwx[:, i,j] = torch.sum(self._xwx(torch.cat((parameters[:,i,:], parameters[:, j, :]), dim = 1))[:,ei])
             #print("xwx[:, i,j]:", xwx[:, i,j])
 
