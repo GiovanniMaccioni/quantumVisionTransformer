@@ -1,7 +1,7 @@
 import torch
 
 import hybrid_mlp as H
-import new_model as M
+import QViT as M
 import data as D
 import train as T
 
