@@ -19,9 +19,7 @@
 <!-- ABOUT THE PROJECT -->
 ## About The Project
 
-In this study we implemented the Quantum Orthogonal Transformer from [Quantum Vision Transformers, Cherrat et al.](Cherrat, El Amine, et al. "Quantum vision transformers." arXiv preprint arXiv:2209.08167 (2022)) using Pytorch and Qiskit.
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
+In this study we implemented the Quantum Orthogonal Transformer from [Quantum Vision Transformers, Cherrat et al.](https://arxiv.org/abs/2209.08167) using Pytorch and Qiskit.
 
 <!-- GETTING STARTED -->
 ## Getting Started
@@ -40,9 +38,7 @@ Running main.py will execute the training. To see the possible arguments
 main.py -h
 ```
 
-Or check directly the main file.
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
+Or check directly the main.py file.
 
 
 [PyTorch-url]: https://pytorch.org/
