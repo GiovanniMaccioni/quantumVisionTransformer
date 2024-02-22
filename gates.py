@@ -6,12 +6,28 @@ class RBS_gate:
         self.n_qubits = 2
         self._circuit = qis.QuantumCircuit(self.n_qubits)
         self.theta = parameter
-        self._circuit.h([0,1])#DEBUG
+        self._circuit.h([0,1])
         self._circuit.cz(0,1)
         self._circuit.ry(self.theta, 0)
         self._circuit.ry(-self.theta, 1)
         self._circuit.cz(0,1)
-        self._circuit.h([0,1])#DEBUG                                 
+        self._circuit.h([0,1])                               
+
+    def __call__(self):
+      return self._circuit.to_gate()
+    
+#Implemented since there was problems inverting the cirtcuit with the qiskit library
+class RBS_gate_inverted:
+    def __init__(self, parameter):
+        self.n_qubits = 2
+        self._circuit = qis.QuantumCircuit(self.n_qubits)
+        self.theta = parameter
+        self._circuit.h([0,1])
+        self._circuit.cz(0,1)
+        self._circuit.ry(-self.theta, 0)
+        self._circuit.ry(self.theta, 1)
+        self._circuit.cz(0,1)
+        self._circuit.h([0,1])                                
 
     def __call__(self):
       return self._circuit.to_gate()

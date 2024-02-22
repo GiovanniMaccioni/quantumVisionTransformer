@@ -1,60 +1,57 @@
-from qiskit import Aer
+#from qiskit import Aer
 import qiskit as qis
 import matplotlib.pyplot as plt
-from qiskit.tools.visualization import plot_histogram
 from qiskit import transpile
 
 import torch
 
 import numpy as np
-from qiskit.utils import algorithm_globals
+
 
 from functools import reduce
 
-from gates import RBS_gate
+from gates import RBS_gate, RBS_gate_inverted
 
     
 class Parallel_VectorLoader:
-    """ 
-    This class provides a simple interface for interaction 
-    with the quantum circuit 
-    """
     
-    def __init__(self, parameter_vector):
-        # --- Circuit definition ---
+    def __init__(self, parameter_vector, inverted=False):
         self.n_qubits = len(parameter_vector)+1
         self._circuit = qis.QuantumCircuit(self.n_qubits)
         self._circuit.x(0)
 
-        #self.num_gates = self.n_qubits//2 * torch.log2(self.n_qubits)
-        #self.num_gates_each_level = self.num_qubits//2
-        #self.num_gates = self.n_qubits//2 * np.log2(self.n_qubits)
         step = self.n_qubits//2
-        #print((self.n_qubits//temp) != self.n_qubits)
-        num_gates_each_level = 1
+
+
         id_gate = 0
         temp = self.n_qubits
 
-        #parameters = self.get_RBS_parameters(input_vector[:,None, :])
-        
-        #while num_gates_each_level != (self.n_qubits//2):#FIXME doesn't work with num_features == 2
-        while temp != 1:#FIXME doesn't work with num_features == 2
-          #print(temp)
+        idx_list = []
+        rbs_list = []
+
+        while temp != 1:
           for i in range(self.n_qubits//temp):
-            #print(id_gate)
+            if inverted:
+                rbs_list.append(RBS_gate_inverted(parameter_vector[self.n_qubits-2-id_gate])())
+            else:
+                rbs_list.append(RBS_gate(parameter_vector[id_gate])())
+            
             id_gate += 1
-            rbs = RBS_gate(parameter_vector[id_gate - 1])()
-            #index = self.n_qubits//temp
+
             step = temp // 2
             idx = i*2*step
-            #print("step:", step)
-            #print("idx:", idx, " to idx+1:", idx+step)
-            self._circuit.append(rbs, [idx, idx+step])
-            #self._circuit.barrier()
-          
-          #num_gates_each_level = num_gates_each_level*2
-          self._circuit.barrier()
+            idx_list.append([idx, idx+step])
+
           temp = temp // 2
+        
+        num_gates = len(rbs_list) - 1
+        for i, rbs in enumerate(rbs_list):
+            if inverted:
+                self._circuit.append(rbs, idx_list[num_gates-i]) 
+            else:
+                self._circuit.append(rbs, idx_list[i])
+
+        return
 
     def __call__(self, input_vector=None):
         if input_vector != None:
@@ -65,54 +62,55 @@ class Parallel_VectorLoader:
                 index += 1
         return self._circuit
     
+    
     def get_RBS_parameters(self, x):
-        # get recursively the angles
-        def angles(y):
-            #Get the len of the components. In the first call it is the length of the vector in input!!
-            d = y.shape[-1]
-            if d == 2:
-                #print(y.shape)
-                thetas = torch.acos(y[:,:, 0] / torch.linalg.norm(y, ord=None, dim=2))
-                #print("thetas.shape: ", thetas.shape)
-                signs = (y[:, :, 1] > 0.).int()
-                thetas = signs * thetas + (1. - signs) * (2*np.pi - thetas)
-                #print("thetas.shape: ", thetas.shape)
-                thetas = thetas[:,:, None]
-                return thetas
+        half = x.shape[2]//2
+        r1 = []
+        r2 = []
+        for j in range(0, half):
+            r1.append(torch.sqrt(torch.pow(x[:, :, 2*j+1]+1e-4, 2) + torch.pow(x[:, :, 2*j]+1e-4, 2)+1e-8)[:, :, None])
+        r1 = torch.cat(r1, dim=2)
+        for j in range(0, half-1):
+            if j < half//2: 
+                r2.insert(0,(torch.sqrt(torch.pow(r1[:, :, half-1-j]+1e-4, 2) + torch.pow(r1[:, :, half-1-j-1]+1e-4, 2))+1e-8)[:, :, None])
             else:
-                #First d/2 values, 
-                thetas = torch.acos(torch.linalg.norm(y[:,:, :d//2], ord=None, dim=2, keepdim=True) / torch.linalg.norm(y, ord=None, dim=2, keepdim=True))
-                #print("else: thetas.shape: ", thetas.shape)
-                #print("y[:,:, :d // 2]", y[:, :, :d // 2])
-                thetas_l = angles(y[:, :, :d//2])
-                thetas_r = angles(y[:, :, d//2 :])
-                thetas = torch.cat((thetas, thetas_l, thetas_r), axis=2)
-                #print("thetas.shape: ", thetas.shape)
-            return thetas
+                r2.insert(0, (torch.sqrt(torch.pow(r2[1]+1e-4, 2) + torch.pow(r2[0]+1e-4, 2))+1e-8))
+        r2 = torch.cat(r2, dim=2)
+        parameters1 = []
+        parameters2 = []
+        for j in range(0, half):
+            mask = (x[:, :, 2*j+1] >= 0.).int().float()
+            t1 = (torch.acos(torch.clamp(x[:,:,2*j]/(r1[:,:,j]+1e-8), min=-1., max=1.)))*mask
+            t2 = (2*np.pi - torch.acos(torch.clamp(x[:,:,2*j]/(r1[:,:,j]+1e-8), min=-1., max=1.)))*(1. - mask)
+            parameters1.append((t1+t2)[:,:,None])
+                
+        r = torch.cat((r2, r1), dim=2)
+        for j in range(0, half-1):
+            parameters2.append(torch.acos(torch.clamp(r[:,:,2*j+1]/(r[:,:,j]+1e-8), min=-1., max=1.))[:, :, None])
+                
 
-        # result
-        thetas = angles(x)
+        parameters1 = torch.cat(parameters1, dim=2)
+        parameters2 = torch.cat(parameters2, dim=2)
+        parameters = torch.cat((parameters2, parameters1), dim=2)
 
-        torch.nan_to_num(thetas)
-
-        return thetas.flatten().tolist()
+        return parameters
         
     
 class Diagonal_VectorLoader:
-    """ 
-    This class provides a simple interface for interaction 
-    with the quantum circuit 
-    """
     
-    def __init__(self, parameter_vector):
+    def __init__(self, parameter_vector, inverted=False):
         # --- Circuit definition ---
         self.n_qubits = len(parameter_vector)+1
         self._circuit = qis.QuantumCircuit(self.n_qubits)
         self._circuit.x(0)
 
         for i in range(self.n_qubits-1):
-            rbs = RBS_gate(parameter_vector[i])()
-            self._circuit.append(rbs, [i, i+1])
+            if inverted:
+                rbs = RBS_gate_inverted(parameter_vector[self.n_qubits-2-i])()
+                self._circuit.append(rbs, [self.n_qubits-2-i,self.n_qubits-2+1-i])
+            else:
+                rbs = RBS_gate(parameter_vector[i])()
+                self._circuit.append(rbs, [i, i+1])
 
     def __call__(self, input_vector=None):
         if input_vector != None:
@@ -122,7 +120,7 @@ class Diagonal_VectorLoader:
                 self._circuit = self._circuit.bind_parameters({param: parameters[index]})
                 index += 1
         return self._circuit
-        
+
     def get_RBS_parameters(self, x):
         #
         alpha_list = []
@@ -130,19 +128,15 @@ class Diagonal_VectorLoader:
         #
         for i in range(x.shape[2] - 1):
             if len(alpha_list) == 0:
-                alpha = torch.acos(x[:, :, i])
-                #alpha = torch.nan_to_num(alpha)
+                alpha = torch.acos(torch.clamp(x[:, :, i], min=-1., max=1.))
                 alpha_list.append(alpha)
             else:
-                inv_sin = 1/torch.sin(alpha_list[i-1])
-                #if the sin of the alpha angle is 0, we have to convert the nan value to 0
-                inv_sin = torch.nan_to_num(inv_sin)
+                inv_sin = 1/(torch.sin(alpha_list[i-1]) + 1e-8)
                 inv_sin_list.append(inv_sin)
                 t = reduce(lambda a, b: a*b, inv_sin_list)
-                alpha = torch.acos(x[:, :, i]*t)
+                alpha = torch.acos(torch.clamp(x[:, :, i]*t, min=-1., max=1.))
                 alpha_list.append(alpha)
         
-        parameters = torch.cat(alpha_list, dim=1)
-        torch.nan_to_num(parameters[:,None, :])
+        parameters = torch.stack(alpha_list, dim=2)
 
-        return parameters.flatten().tolist()
+        return parameters
